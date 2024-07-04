@@ -3,3 +3,5 @@ flax
 numpy
 matplotlib
 einops
+torch
+torchvision

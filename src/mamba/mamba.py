@@ -22,8 +22,9 @@ class ModelArgs:
 
     @classmethod
     def init(
+        self,
         d_model: int,
-        n_layer: int,
+        n_layers: int,
         vocab_size: int,
         d_state: int = 16,
         expand: int = 2,
@@ -34,15 +35,15 @@ class ModelArgs:
         bias: bool = False
     ):
         d_inner = expand + d_model
-        # dt_rank = -1 is auto only during init
-        # otherwise, dt_rank is already some float
-        dt_rank = jax.lax.select(dt_rank == -1, jnp.ceil(d_model/ 16), dt_rank)
-        vocab_size = jax.lax.select(vocab_size % pad_vocab_size_multiple != 0, vocab_size + (pad_vocab_size_multiple - vocab_size % pad_vocab_size_multiple), vocab_size)
+        if dt_rank == "auto":
+            dt_rank = jnp.ceil(d_model/16)
+        if vocab_size % pad_vocab_size_multiple != 0:
+            vocab_size += (pad_vocab_size_multiple - vocab_size % pad_vocab_size_multiple)
 
         return ModelArgs(
             d_model,
             d_inner,
-            n_layer,
+            n_layers,
             vocab_size,
             d_state,
             expand,
@@ -92,9 +93,9 @@ class MambaBlock(nn.Module):
     args: ModelArgs
     
     def setup(self):
-        self.in_proj = nn.Dense(self.args.d_model, use_bias=self.args.bias)
+        # self.in_proj = nn.Dense(self.args.d_model, use_bias=self.args.bias)
         self.conv1d = nn.Conv(
-            feature=self.args.d_inner,
+            features=self.args.d_inner,
             kernel_size=self.args.d_conv,
             padding=self.args.d_conv - 1,
             use_bias=self.args.conv_bias,
@@ -105,10 +106,10 @@ class MambaBlock(nn.Module):
         # project x to corresponding dt, B, C
         self.x_proj = nn.Dense(self.args.dt_rank + self.args.d_state * 2, use_bias=False)
         
-        self.dt_proj = nn.Dense(self.d_inner, use_bias=True)
+        self.dt_proj = nn.Dense(self.args.d_inner, use_bias=True)
         A = repeat(jnp.arange(1, self.args.d_inner + 1), "n -> n d", d=self.args.d_inner)
-        self.A_log = self.param("A_log", jnp.log, A)
-        self.D = self.param("D", jnp.ones, self.args.d_inner)
+        self.A_log = self.param("A_log", lambda rng, x: jnp.log(x), A)
+        self.D = self.param("D", nn.initializers.ones, self.args.d_inner)
         self.out_proj = nn.Dense(self.args.d_model, use_bias=self.args.bias)
         
     def select_scan(self, u: jnp.ndarray, delta: jnp.ndarray, A: jnp.ndarray, B: jnp.ndarray, C: jnp.ndarray, D: jnp.ndarray):
@@ -148,6 +149,7 @@ class MambaBlock(nn.Module):
         x, res = x[:, :, :self.args.d_inner], x[:, :, self.args.d_inner:]
         
         x = rearrange(x, "b l d_inner -> b d_inner l")
+        print(x.shape)
         x = self.conv1d(x)[:, :, :l]
         x = rearrange(x, "b d_inner l -> b l d_inner")
         
@@ -163,9 +165,27 @@ class RMSNorm(nn.Module):
     eps: float = 1e-15
 
     def setup(self) -> None:
-        self.weight = self.param("weight", jnp.ones, self.d_model)
+        self.weight = self.param("weight", nn.initializers.ones, (1,))
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        x_squared = jnp.pow(x, 2).mean(axis=-1, keepdim=True)
+        x_squared = jnp.pow(x, 2).mean(axis=-1, keepdims=True)
         rsqrt_term = jnp.power(jnp.sqrt(x_squared + self.eps), -1)
         return x * rsqrt_term * self.weight
+
+if __name__ == "__main__":
+    seed = 0
+    rng = jax.random.PRNGKey(seed)
+    BATCH_SIZE = 4
+
+    args = ModelArgs.init(d_model=4, n_layers=8, vocab_size=2048)
+
+    norm_layer = RMSNorm(4)
+    x = jnp.zeros((BATCH_SIZE, 4))
+    norm_params = norm_layer.init(rng, x)
+
+    mamba_block = MambaBlock(args)
+    # input shape is (BATCH_SIZE, l, d)
+    length = 16
+    d = 4
+    x = jnp.zeros((BATCH_SIZE, length, d))
+    mamba_block_params = mamba_block.init(rng, x)

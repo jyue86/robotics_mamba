@@ -149,11 +149,7 @@ class MambaBlock(nn.Module):
         x, res = jnp.split(x_res, [self.args.d_inner], axis=-1)
         
         conv_x = self.conv1d(x)
-        x = jnp.split(conv_x, [l], axis=-1)[0]         # dynamic slicing issue in jax
-        x = rearrange(x, "b d_inner l -> b l d_inner")
-        
         x = nn.silu(x)
-        
         y = self.ssm(x)
         y = y * nn.silu(res)
         return self.out_proj(y)

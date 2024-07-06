@@ -148,10 +148,7 @@ class MambaBlock(nn.Module):
         x_res = self.in_proj(x)
         x, res = jnp.split(x_res, [self.args.d_inner], axis=-1)
         
-        x = rearrange(x, "b l d_inner -> b d_inner l")
-        print(f"x shape: {x.shape}")
         conv_x = self.conv1d(x)
-        print(f"conv_x.shape: {conv_x.shape}")
         x = jnp.split(conv_x, [l], axis=-1)[0]         # dynamic slicing issue in jax
         x = rearrange(x, "b d_inner l -> b l d_inner")
         
@@ -160,7 +157,6 @@ class MambaBlock(nn.Module):
         y = self.ssm(x)
         y = y * nn.silu(res)
         return self.out_proj(y)
-        
 
 class RMSNorm(nn.Module):
     d_model: int
@@ -174,12 +170,13 @@ class RMSNorm(nn.Module):
         rsqrt_term = jnp.power(jnp.sqrt(x_squared + self.eps), -1)
         return x * rsqrt_term * self.weight
 
+
 if __name__ == "__main__":
     seed = 0
     rng = jax.random.PRNGKey(seed)
-    BATCH_SIZE = 4
+    BATCH_SIZE = 1
 
-    args = ModelArgs.init(d_model=4, n_layers=8, vocab_size=2048)
+    args = ModelArgs.init(d_model=1024, n_layers=48, vocab_size=50277)
 
     norm_layer = RMSNorm(4)
     x = jnp.zeros((BATCH_SIZE, 4))
@@ -187,7 +184,7 @@ if __name__ == "__main__":
 
     mamba_block = MambaBlock(args)
     # input shape is (BATCH_SIZE, l, d)
-    length = 16
-    d = 4
+    length = 4
+    d = 1024
     x = jnp.zeros((BATCH_SIZE, length, d))
     mamba_block_params = mamba_block.init(rng, x)

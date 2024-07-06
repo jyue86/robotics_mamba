@@ -1,1 +1,1 @@
-from .mamba import ModelArgs, Mamba, MambaBlock, ResidualBlock, RMSNorm
+from .model import ModelArgs, Mamba, MambaBlock, ResidualBlock, RMSNorm

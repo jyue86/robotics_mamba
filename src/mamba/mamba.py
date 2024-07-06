@@ -34,7 +34,7 @@ class ModelArgs:
         conv_bias: bool = True,
         bias: bool = False
     ):
-        d_inner = expand + d_model
+        d_inner = expand * d_model
         if dt_rank == "auto":
             dt_rank = jnp.ceil(d_model/16)
         if vocab_size % pad_vocab_size_multiple != 0:
@@ -93,7 +93,6 @@ class MambaBlock(nn.Module):
     args: ModelArgs
     
     def setup(self):
-        # self.in_proj = nn.Dense(self.args.d_model, use_bias=self.args.bias)
         self.conv1d = nn.Conv(
             features=self.args.d_inner,
             kernel_size=self.args.d_conv,
@@ -136,6 +135,7 @@ class MambaBlock(nn.Module):
         A = -jnp.exp(self.A_log)
         D = self.D
         
+        print(f"x shape: {x.shape}, dtype: {x.dtype}")
         mid = self.x_proj(x)
         delta, B, C = jnp.split(mid, [self.args.dt_rank, self.args.d_state + self.args.dt_rank], axis=-1)
         delta = nn.softplus(self.dt_proj(delta))
@@ -146,11 +146,13 @@ class MambaBlock(nn.Module):
     def __call__(self, x: jnp.ndarray):
         b, l, d = x.shape
         x_res = self.in_proj(x)
-        x, res = x[:, :, :self.args.d_inner], x[:, :, self.args.d_inner:]
+        x, res = jnp.split(x_res, [self.args.d_inner], axis=-1)
         
         x = rearrange(x, "b l d_inner -> b d_inner l")
-        print(x.shape)
-        x = self.conv1d(x)[:, :, :l]
+        print(f"x shape: {x.shape}")
+        conv_x = self.conv1d(x)
+        print(f"conv_x.shape: {conv_x.shape}")
+        x = jnp.split(conv_x, [l], axis=-1)[0]         # dynamic slicing issue in jax
         x = rearrange(x, "b d_inner l -> b l d_inner")
         
         x = nn.silu(x)

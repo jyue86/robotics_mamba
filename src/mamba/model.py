@@ -60,6 +60,7 @@ class Mamba(nn.Module):
     args: ModelArgs
     
     def setup(self) -> None:
+        print("n layers:", self.args.n_layers)
         self.embedding = nn.Embed(self.args.vocab_size, self.args.d_model)
         self.layers = nn.Sequential([ResidualBlock(self.args) for i in range(self.args.n_layers)])
         self.norm_f = RMSNorm(self.args.d_model)
@@ -70,7 +71,7 @@ class Mamba(nn.Module):
         x = self.layers(x)
         x = self.norm_f(x)
         logits = self.lm_head(x)
-        # Not sure if this is proper way of sharing weights
+        # TODO: Figure how to properly tie weights 
         out = self.embedding.attend(logits)
         return out 
 
@@ -94,12 +95,13 @@ class MambaBlock(nn.Module):
     args: ModelArgs
     
     def setup(self):
+        print(self.args.d_inner, self.args.conv_bias, self.args.d_conv)
         self.conv1d = nn.Conv(
             features=self.args.d_inner,
-            kernel_size=self.args.d_conv,
-            padding=self.args.d_conv - 1,
             use_bias=self.args.conv_bias,
-            feature_group_count=self.args.d_inner
+            kernel_size=self.args.d_conv,
+            feature_group_count=self.args.d_inner,
+            padding=self.args.d_conv - 1
         )
         
         self.in_proj = nn.Dense(self.args.d_inner * 2, use_bias=self.args.bias)
@@ -120,22 +122,18 @@ class MambaBlock(nn.Module):
         deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         
         x = jnp.zeros((b, self.args.d_inner, n)) # , device=deltaA.devices
-        # ys = []
 
-        # jax.lax.scan()
-        # for i in range(l):
-        #     x = deltaA[:, i] * x + deltaB_u[:, i]
-        #     y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
-        #     ys.append(y)
-        # y = jnp.stack(ys, dim=1)  # shape (b, l, d_in)
-        
-        # y = y + u * D
         def compute_scan(x, i):
             x = deltaA[:, i] * x + deltaB_u[:, i]
+            print(x.shape)
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
+            print(y.shape)
             return x, y
         _, y = jax.lax.scan(compute_scan, x, jnp.arange(l))
-
+        y = y.swapaxes(0, 1)
+        print("After stack, y shape:", y.shape)
+        y = y + u * D
+        print("After euler, y shape:", y.shape)
     
         return y
     
@@ -151,14 +149,19 @@ class MambaBlock(nn.Module):
         
         return y
 
+    # TODO: Figure out how to get self.conv1d to return a 1x4x2048
     def __call__(self, x: jnp.ndarray):
         b, l, d = x.shape
         x_res = self.in_proj(x)
         x, res = jnp.split(x_res, [self.args.d_inner], axis=-1)
         
         x = self.conv1d(x)
+        # x = jnp.zeros((1, 4, 2048))
         x = nn.silu(x)
         y = self.ssm(x)
+        # print("final y:", y.shape)
+        # y = jnp.zeros((7, 1, 2048)) # comment this to test broken code
+        jnp.zeros((1, 4, 2048)) ** nn.silu(jnp.zeros((1, 4, 2048)))
         y = y * nn.silu(res)
         return self.out_proj(y)
 
@@ -182,24 +185,24 @@ if __name__ == "__main__":
 
     args = ModelArgs.init(d_model=1024, n_layers=48, vocab_size=50277)
 
-    norm_layer = RMSNorm(4)
-    x = jnp.zeros((BATCH_SIZE, 4))
-    norm_params = norm_layer.init(rng, x)
-    y = norm_layer.apply(norm_params, x)
+    # norm_layer = RMSNorm(4)
+    # x = jnp.zeros((BATCH_SIZE, 4))
+    # norm_params = norm_layer.init(rng, x)
+    # y = norm_layer.apply(norm_params, x)
 
-    mamba_block = MambaBlock(args)
-    # input shape is (BATCH_SIZE, l, d)
-    length = 4
-    d = 1024
-    x = jnp.zeros((BATCH_SIZE, length, d))
-    mamba_block_params = mamba_block.init(rng, x)
-    y = mamba_block.apply(mamba_block_params, x)
+    # mamba_block = MambaBlock(args)
+    # # input shape is (BATCH_SIZE, l, d)
+    # length = 4
+    # d = 1024
+    # x = jnp.zeros((BATCH_SIZE, length, d))
+    # mamba_block_params = mamba_block.init(rng, x)
+    # y = mamba_block.apply(mamba_block_params, x)
 
-    residual_block = ResidualBlock(args)
-    residual_block_params = residual_block.init(rng, x)
-    y = residual_block.apply(residual_block_params, x)
+    # residual_block = ResidualBlock(args)
+    # residual_block_params = residual_block.init(rng, x)
+    # y = residual_block.apply(residual_block_params, x)
 
-    input_ids = jnp.zeros((1, 2), dtype=jnp.int32)
+    input_ids = jnp.zeros((1, 4), dtype=jnp.int32)
     mamba = Mamba(args)
     mamba_params = mamba.init(rng, input_ids)
     y = mamba.apply(mamba_params, input_ids)

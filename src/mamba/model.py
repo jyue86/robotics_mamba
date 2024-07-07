@@ -60,7 +60,6 @@ class Mamba(nn.Module):
     args: ModelArgs
     
     def setup(self) -> None:
-        print("n layers:", self.args.n_layers)
         self.embedding = nn.Embed(self.args.vocab_size, self.args.d_model)
         self.layers = nn.Sequential([ResidualBlock(self.args) for i in range(self.args.n_layers)])
         self.norm_f = RMSNorm(self.args.d_model)
@@ -95,7 +94,6 @@ class MambaBlock(nn.Module):
     args: ModelArgs
     
     def setup(self):
-        print(self.args.d_inner, self.args.conv_bias, self.args.d_conv)
         self.conv1d = nn.Conv(
             features=self.args.d_inner,
             use_bias=self.args.conv_bias,
@@ -125,15 +123,11 @@ class MambaBlock(nn.Module):
 
         def compute_scan(x, i):
             x = deltaA[:, i] * x + deltaB_u[:, i]
-            print(x.shape)
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
-            print(y.shape)
             return x, y
         _, y = jax.lax.scan(compute_scan, x, jnp.arange(l))
         y = y.swapaxes(0, 1)
-        print("After stack, y shape:", y.shape)
         y = y + u * D
-        print("After euler, y shape:", y.shape)
     
         return y
     
@@ -149,18 +143,14 @@ class MambaBlock(nn.Module):
         
         return y
 
-    # TODO: Figure out how to get self.conv1d to return a 1x4x2048
     def __call__(self, x: jnp.ndarray):
         b, l, d = x.shape
         x_res = self.in_proj(x)
         x, res = jnp.split(x_res, [self.args.d_inner], axis=-1)
         
-        x = self.conv1d(x)
-        # x = jnp.zeros((1, 4, 2048))
+        x = self.conv1d(x)[:,:l]
         x = nn.silu(x)
         y = self.ssm(x)
-        # print("final y:", y.shape)
-        # y = jnp.zeros((7, 1, 2048)) # comment this to test broken code
         jnp.zeros((1, 4, 2048)) ** nn.silu(jnp.zeros((1, 4, 2048)))
         y = y * nn.silu(res)
         return self.out_proj(y)

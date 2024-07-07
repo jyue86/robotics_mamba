@@ -107,27 +107,35 @@ class MambaBlock(nn.Module):
         self.x_proj = nn.Dense(self.args.dt_rank + self.args.d_state * 2, use_bias=False)
         
         self.dt_proj = nn.Dense(self.args.d_inner, use_bias=True)
-        A = repeat(jnp.arange(1, self.args.d_inner + 1), "n -> n d", d=self.args.d_inner)
+        A = repeat(jnp.arange(1, self.args.d_state + 1), "n -> d n", d=self.args.d_inner)
         self.A_log = self.param("A_log", lambda rng, x: jnp.log(x), A)
         self.D = self.param("D", nn.initializers.ones, self.args.d_inner)
         self.out_proj = nn.Dense(self.args.d_model, use_bias=self.args.bias)
         
     def select_scan(self, u: jnp.ndarray, delta: jnp.ndarray, A: jnp.ndarray, B: jnp.ndarray, C: jnp.ndarray, D: jnp.ndarray):
         b, l, d_inner = u.shape
-        n = A.shape[1]
+        n = A.shape[1] # 2048
         
         deltaA = jnp.exp(einsum(delta, A, "b l d_in, d_in n -> b l d_in n"))
         deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         
         x = jnp.zeros((b, self.args.d_inner, n)) # , device=deltaA.devices
-        ys = []
-        for i in range(l):
+        # ys = []
+
+        # jax.lax.scan()
+        # for i in range(l):
+        #     x = deltaA[:, i] * x + deltaB_u[:, i]
+        #     y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
+        #     ys.append(y)
+        # y = jnp.stack(ys, dim=1)  # shape (b, l, d_in)
+        
+        # y = y + u * D
+        def compute_scan(x, i):
             x = deltaA[:, i] * x + deltaB_u[:, i]
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
-            ys.append(y)
-        y = jnp.stack(ys, dim=1)  # shape (b, l, d_in)
-        
-        y = y + u * D
+            return x, y
+        _, y = jax.lax.scan(compute_scan, x, jnp.arange(l))
+
     
         return y
     

@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 from typing import Union
 from einops import rearrange, repeat, einsum
+import math
 
 
 @dataclass
@@ -36,7 +37,7 @@ class ModelArgs:
     ):
         d_inner = expand * d_model
         if dt_rank == "auto":
-            dt_rank = jnp.ceil(d_model/16)
+            dt_rank = math.ceil(d_model/16)
         if vocab_size % pad_vocab_size_multiple != 0:
             vocab_size += (pad_vocab_size_multiple - vocab_size % pad_vocab_size_multiple)
 
@@ -118,8 +119,8 @@ class MambaBlock(nn.Module):
         deltaA = jnp.exp(einsum(delta, A, "b l d_in, d_in n -> b l d_in n"))
         deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')
         
-        x = jnp.zeros((b, self.args.d_inner, n), device=deltaA.device)
-        ys = []    
+        x = jnp.zeros((b, self.args.d_inner, n)) # , device=deltaA.devices
+        ys = []
         for i in range(l):
             x = deltaA[:, i] * x + deltaB_u[:, i]
             y = einsum(x, C[:, i, :], 'b d_in n, b n -> b d_in')
@@ -135,8 +136,9 @@ class MambaBlock(nn.Module):
         A = -jnp.exp(self.A_log)
         D = self.D
         
-        print(f"x shape: {x.shape}, dtype: {x.dtype}")
-        mid = self.x_proj(x)
+        # x = x.reshape(1, -1)
+        print(f"x shape: {x.shape}, dtype: {type(x.shape)}")
+        mid = self.x_proj(x)  # 96
         delta, B, C = jnp.split(mid, [self.args.dt_rank, self.args.d_state + self.args.dt_rank], axis=-1)
         delta = nn.softplus(self.dt_proj(delta))
         y = self.select_scan(x, delta, A, B, C, D)
@@ -148,8 +150,10 @@ class MambaBlock(nn.Module):
         x_res = self.in_proj(x)
         x, res = jnp.split(x_res, [self.args.d_inner], axis=-1)
         
-        conv_x = self.conv1d(x)
+        x = self.conv1d(x)
+        jax.debug.print("after conv: {}", jnp.shape(x))
         x = nn.silu(x)
+        jax.debug.print("after silu: {}", jnp.shape(x))
         y = self.ssm(x)
         y = y * nn.silu(res)
         return self.out_proj(y)

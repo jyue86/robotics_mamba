@@ -63,15 +63,13 @@ class Mamba(nn.Module):
         self.embedding = nn.Embed(self.args.vocab_size, self.args.d_model)
         self.layers = nn.Sequential([ResidualBlock(self.args) for i in range(self.args.n_layers)])
         self.norm_f = RMSNorm(self.args.d_model)
-        self.lm_head = nn.Dense(self.args.vocab_size, use_bias=False)
     
     def __call__(self, input_ids: jnp.ndarray) -> jnp.ndarray:
         x = self.embedding(input_ids)
         x = self.layers(x)
         x = self.norm_f(x)
-        logits = self.lm_head(x)
-        # TODO: Figure how to properly tie weights 
-        out = self.embedding.attend(logits)
+        # use same weights to convert back to token dimensions
+        out = self.embedding.attend(x)
         return out 
 
     @staticmethod
@@ -114,7 +112,7 @@ class MambaBlock(nn.Module):
         
     def select_scan(self, u: jnp.ndarray, delta: jnp.ndarray, A: jnp.ndarray, B: jnp.ndarray, C: jnp.ndarray, D: jnp.ndarray):
         b, l, d_inner = u.shape
-        n = A.shape[1] # 2048
+        n = A.shape[1] # 
         
         deltaA = jnp.exp(einsum(delta, A, "b l d_in, d_in n -> b l d_in n"))
         deltaB_u = einsum(delta, B, u, 'b l d_in, b l n, b l d_in -> b l d_in n')

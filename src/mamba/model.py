@@ -3,7 +3,7 @@ from flax.struct import dataclass
 import jax
 import jax.numpy as jnp
 from typing import Union
-from einops import rearrange, repeat, einsum
+from einops import repeat, einsum
 import math
 
 
@@ -149,7 +149,6 @@ class MambaBlock(nn.Module):
         x = self.conv1d(x)[:,:l]
         x = nn.silu(x)
         y = self.ssm(x)
-        jnp.zeros((1, 4, 2048)) ** nn.silu(jnp.zeros((1, 4, 2048)))
         y = y * nn.silu(res)
         return self.out_proj(y)
 
@@ -190,7 +189,7 @@ if __name__ == "__main__":
     # residual_block_params = residual_block.init(rng, x)
     # y = residual_block.apply(residual_block_params, x)
 
-    input_ids = jnp.zeros((1, 4), dtype=jnp.int32)
+    input_ids = jnp.zeros((1, 2), dtype=jnp.int32)
     mamba = Mamba(args)
     mamba_params = mamba.init(rng, input_ids)
     y = mamba.apply(mamba_params, input_ids)

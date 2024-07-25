@@ -189,7 +189,9 @@ if __name__ == "__main__":
     # residual_block_params = residual_block.init(rng, x)
     # y = residual_block.apply(residual_block_params, x)
 
-    input_ids = jnp.zeros((1, 2), dtype=jnp.int32)
+    input_ids = jnp.zeros((1, 4), dtype=jnp.int32)
+    input_ids2 = jnp.zeros((1, 5), dtype=jnp.int32)
     mamba = Mamba(args)
     mamba_params = mamba.init(rng, input_ids)
     y = mamba.apply(mamba_params, input_ids)
+    y = mamba.apply(mamba_params, input_ids2)

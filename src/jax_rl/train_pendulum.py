@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import gymnax
 
-from pendulum_animation import PendulumVisualizer
+from animation import PendulumVisualizer
 
 
 def visualize_example():
@@ -33,15 +33,16 @@ def visualize_example():
     obs, env_state = env.reset(rng_reset, env_params)
     all_thetas = [env_state.theta]
 
+    jit_step = jax.jit(env.step)
+
     while True:
         state_seq.append(env_state)
         rng, rng_act, rng_step = jax.random.split(rng, 3)
         action = env.action_space(env_params).sample(rng_act)
-        next_obs, next_env_state, reward, done, info = env.step(
+        next_obs, next_env_state, reward, done, info = jit_step(
             rng_step, env_state, action, env_params
         )
         reward_seq.append(reward)
-        print(next_env_state.theta)
         all_thetas.append(next_env_state.theta)
         if done:
             break

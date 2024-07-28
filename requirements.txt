@@ -7,3 +7,5 @@ torch
 torchvision
 clu
 gymnax
+optax
+distrax
